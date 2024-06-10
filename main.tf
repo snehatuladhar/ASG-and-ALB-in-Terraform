@@ -1,124 +1,58 @@
-provider "aws" {
-  region = "us-east-1"
+# Creating VPC
+resource "aws_vpc" "main" {
+  cidr_block = var.vpc_cidr
+  tags       = var.tags
 }
 
-resource "aws_vpc" "main_vpc" {
-  cidr_block = var.vpc_cidr
+# Creating public subnets
+resource "aws_subnet" "public" {
+  count             = length(var.public_subnet_cidrs)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = var.public_subnet_cidrs[count.index]
+  availability_zone = element(var.availability_zones, count.index)
+  tags              = var.tags
+}
 
+# Creating private subnets
+resource "aws_subnet" "private" {
+  count             = length(var.private_subnet_cidrs)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = var.private_subnet_cidrs[count.index]
+  availability_zone = element(var.availability_zones, count.index)
+  tags              = var.tags
+}
+
+# Creating Internet Gateway
+resource "aws_internet_gateway" "gw" {
+  vpc_id = aws_vpc.main.id
+  tags   = var.tags
+}
+
+# Creating route table for public subnets
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.gw.id
+  }
   tags = var.tags
 }
 
-resource "aws_subnet" "public_subnets" {
-  count             = length(var.public_subnet_cidrs)
-  vpc_id            = aws_vpc.main_vpc.id
-  cidr_block        = element(var.public_subnet_cidrs, count.index)
-  availability_zone = element(var.availability_zones, count.index)
-
-  tags = merge(var.tags, {
-    Name = "public_subnet_${count.index + 1}"
-  })
+# Associating public subnets with route table
+resource "aws_route_table_association" "a" {
+  count          = length(var.public_subnet_cidrs)
+  subnet_id      = element(aws_subnet.public.*.id, count.index)
+  route_table_id = aws_route_table.public.id
 }
 
-resource "aws_subnet" "private_subnets" {
-  count             = length(var.private_subnet_cidrs)
-  vpc_id            = aws_vpc.main_vpc.id
-  cidr_block        = element(var.private_subnet_cidrs, count.index)
-  availability_zone = element(var.availability_zones, count.index)
-
-  tags = merge(var.tags, {
-    Name = "private_subnet_${count.index + 1}"
-  })
-}
-
-resource "aws_internet_gateway" "main_ig" {
-  vpc_id = aws_vpc.main_vpc.id
-
-  tags = merge(var.tags, {
-    Name = "sneha_ig"
-  })
-}
-
-resource "aws_eip" "nat_gateway" {
-  domain = "vpc"
-
-  tags = merge(var.tags, {
-    Name = "nat_eip"
-  })
-}
-
-resource "aws_nat_gateway" "main_natgateway" {
-  connectivity_type = "public"
-  allocation_id     = aws_eip.nat_gateway.id
-  subnet_id         = aws_subnet.public_subnets[0].id
-
-  tags = merge(var.tags, {
-    Name = "nat_gateway"
-  })
-}
-
-resource "aws_route_table" "public_route_table" {
-  vpc_id = aws_vpc.main_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main_ig.id
-  }
-
-  tags = merge(var.tags, {
-    Name = "public_route_table"
-  })
-}
-
-resource "aws_route_table" "private_route_table" {
-  vpc_id = aws_vpc.main_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_nat_gateway.main_natgateway.id
-  }
-
-  tags = merge(var.tags, {
-    Name = "private_route_table"
-  })
-}
-
-resource "aws_route_table_association" "public_route_table_subnet_associations" {
-  for_each       = zipmap(range(length(aws_subnet.public_subnets)), aws_subnet.public_subnets[*].id)
-  subnet_id      = each.value
-  route_table_id = aws_route_table.public_route_table.id
-}
-
-resource "aws_route_table_association" "private_route_table_subnet_associations" {
-  for_each       = zipmap(range(length(aws_subnet.private_subnets)), aws_subnet.private_subnets[*].id)
-  subnet_id      = each.value
-  route_table_id = aws_route_table.private_route_table.id
-}
-
-resource "aws_security_group" "server_security" {
-  name        = "server-security-group"
-  description = "Allow SSH, HTTP, and HTTPS traffic"
-  vpc_id      = aws_vpc.main_vpc.id
+# Creating security group for EC2
+resource "aws_security_group" "instance" {
+  vpc_id = aws_vpc.main.id
+  tags   = var.tags
 
   ingress {
-    description = "Allow SSH from anywhere"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Allow HTTP from anywhere"
     from_port   = 80
     to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Allow HTTPS from anywhere"
-    from_port   = 443
-    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -129,20 +63,39 @@ resource "aws_security_group" "server_security" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = merge(var.tags, {
-    Name = "server-security-group"
-  })
 }
 
-resource "aws_lb" "test" {
-  name               = "test-sneha"
-  internal           = false
-  load_balancer_type = "application"
-  subnets            = aws_subnet.public_subnets[*].id
-  enable_deletion_protection = false
-
-  tags = merge(var.tags, {
-    Name = "test-sneha"
-  })
+# Creating EC2 instance
+resource "aws_instance" "web" {
+  ami                         = var.instance_ami_id
+  instance_type               = var.instance_type
+  subnet_id                   = element(aws_subnet.public.*.id, 0)
+  vpc_security_group_ids      = [aws_security_group.instance.id]
+  tags                        = merge(var.tags, { Name = var.instance_name })
 }
+
+# Creating RDS subnet group
+resource "aws_db_subnet_group" "default_subnet_group" {
+  name       = "default_subnet_group_db"
+  subnet_ids = aws_subnet.private.*.id
+  tags       = var.tags
+}
+
+# Creating RDS instance
+resource "aws_db_instance" "private_db" {
+  db_name              = "app_db"
+  identifier           = "terraform-20240606090204339500000006"
+  allocated_storage    = 20
+  storage_type         = "gp2"
+  engine               = "mysql"
+  engine_version       = "8.0"
+  instance_class       = var.db_instance_type
+  username             = "sneha"
+  password             = "sneha12345"
+  parameter_group_name = "default.mysql8.0"
+  skip_final_snapshot  = true
+  publicly_accessible  = false
+  db_subnet_group_name = aws_db_subnet_group.default_subnet_group.name
+  tags                 = merge(var.tags, { Name = "MyDB" })
+}
+

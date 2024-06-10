@@ -1,23 +1,57 @@
-resource "aws_db_subnet_group" "default_subnet_group" {
-  name       = "default_subnet_group_db"
-  subnet_ids = aws_subnet.private_subnets[*].id
+variable "tags" {
+  description = "Common tags to be applied to all resources"
+  type        = map(string)
+  default = {
+    owner     = "sneha"
+    silo      = "intern"
+    terraform = "true"
+  }
 }
 
-resource "aws_db_instance" "private_db" {
-  db_name              = "app_db"
-  identifier           = "terraform-20240606090204339500000006"
-  allocated_storage    = 20
-  storage_type         = "gp2"
-  engine               = "mysql"
-  engine_version       = "8.0"         # Adjust the engine version as per the supported versions
-  instance_class       = "db.t3.micro" # Choose a supported instance class
-  username             = "sneha"
-  password             = "sneha12345"
-  parameter_group_name = "default.mysql8.0"
-  skip_final_snapshot  = true
-  publicly_accessible  = false
-  db_subnet_group_name = aws_db_subnet_group.default_subnet_group.name
-  tags = {
-    Name = "MyDB"
-  }
+variable "instance_name" {
+  description = "Value of name tag for EC2 instance"
+  type        = string
+  default     = "test_web_server"
+}
+
+variable "instance_ami_id" {
+  description = "Default AMI id for EC2 instance (Ubuntu 22.04)"
+  type        = string
+  default     = "ami-04b70fa74e45c3917"
+}
+
+variable "instance_type" {
+  description = "Default type for EC2 instance"
+  type        = string
+  default     = "t2.micro"
+}
+
+variable "db_instance_type" {
+  description = "Default type for database instance"
+  type        = string
+  default     = "db.t3.micro"
+}
+
+variable "private_subnet_cidrs" {
+  description = "CIDRs for private subnet"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+}
+
+variable "public_subnet_cidrs" {
+  description = "CIDRs for public subnet"
+  type        = list(string)
+  default     = ["10.0.101.0/24", "10.0.102.0/24"]
+}
+
+variable "vpc_cidr" {
+  description = "CIDRs for VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "availability_zones" {
+  description = "Availability zones for subnets"
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
 }
