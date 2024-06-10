@@ -90,12 +90,76 @@ resource "aws_db_instance" "private_db" {
   engine               = "mysql"
   engine_version       = "8.0"
   instance_class       = var.db_instance_type
-  username             = "sneha"
-  password             = "sneha12345"
+  username             = local.db_username
+  password             = local.db_password
   parameter_group_name = "default.mysql8.0"
   skip_final_snapshot  = true
   publicly_accessible  = false
   db_subnet_group_name = aws_db_subnet_group.default_subnet_group.name
   tags                 = merge(var.tags, { Name = "MyDB" })
+}
+
+# Creating ALB
+resource "aws_lb" "app_lb" {
+  name               = "app-lb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.instance.id]
+  subnets            = aws_subnet.public.*.id
+  tags               = merge(var.tags, { Name = "AppLoadBalancer" })
+}
+
+# Creating Target Group
+resource "aws_lb_target_group" "app_tg" {
+  name     = "app-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+  tags     = merge(var.tags, { Name = "AppTargetGroup" })
+}
+
+# Creating Listener
+resource "aws_lb_listener" "app_lb_listener" {
+  load_balancer_arn = aws_lb.app_lb.arn
+  port              = 80
+  protocol          = "HTTP"
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app_tg.arn
+  }
+}
+
+# Creating Launch Template
+resource "aws_launch_template" "app_lt" {
+  name_prefix   = "app-launch-template-"
+  image_id      = var.instance_ami_id
+  instance_type = var.instance_type
+  tags = {
+    Name = "AppLaunchTemplate"
+  }
+  tag_specifications {
+    resource_type = "instance"
+    tags          = var.tags
+  }
+}
+
+# Creating Auto Scaling Group
+resource "aws_autoscaling_group" "app_asg" {
+  desired_capacity     = 1
+  max_size             = 3
+  min_size             = 1
+  launch_template {
+    id      = aws_launch_template.app_lt.id
+    version = "$Latest"
+  }
+  vpc_zone_identifier = aws_subnet.public.*.id
+  target_group_arns   = [aws_lb_target_group.app_tg.arn]
+  tags = [
+    {
+      key                 = "Name"
+      value               = "AppInstance"
+      propagate_at_launch = true
+    }
+  ]
 }
 
